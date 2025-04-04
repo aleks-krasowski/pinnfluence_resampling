@@ -1,0 +1,45 @@
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[project]
+name = "pinnfluence_resampling"
+version = "1.0.0"
+authors = [
+  { name="Aleksander Krasowski", email="aleksander.krasowski@hhi.fraunhofer.de" },
+]
+description = "PINNfluence based training data resampling."
+license = {text = "BSD 3-Clause"}
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: BSD 3-Clause License",
+    "Operating System :: OS Independent",
+    "Private :: Do Not Upload"
+]
+dependencies = [
+    "captum @ git+https://github.com/aleks-krasowski/captum.git",
+    "deepxde @ git+https://github.com/aleks-krasowski/deepxde.git",
+    "matplotlib",
+    "numpy",
+    "seaborn",
+    "pandas",
+    "pip",
+    "scikit-learn",
+    "tabulate",
+    "torch",
+]
+
+[project.optional-dependencies]
+jupyter = ["jupyter", "jupyterlab", "ipykernel"]
+
+[project.urls]
+Homepage = "https://github.com/aleks-krasowski/pinnfluence_resampling"
+Issues = "https://github.com/aleks-krasowski/pinnfluence_resampling"
+
+[tool.pdm]
+excludes = ["eval"]
+package-dir = "."
+includes = ["pinnfluence_resampling"]
+
