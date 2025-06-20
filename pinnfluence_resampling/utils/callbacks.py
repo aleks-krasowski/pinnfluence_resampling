@@ -1,10 +1,12 @@
-from deepxde.callbacks import Callback
-from deepxde.metrics import l2_relative_error, mean_squared_error
-import deepxde as dde
-import numpy as np
 import os
 import time
+from collections.abc import Iterable
+
+import deepxde as dde
+import numpy as np
 import torch
+from deepxde.callbacks import Callback
+from deepxde.metrics import l2_relative_error, mean_squared_error
 
 
 class BestModelCheckpoint(Callback):
@@ -20,6 +22,7 @@ class BestModelCheckpoint(Callback):
         restore_best=True,
         monitor="test loss",
         min_delta=0.0,
+        period=100,
     ):
         super().__init__()
         self.filepath = filepath
@@ -31,6 +34,7 @@ class BestModelCheckpoint(Callback):
         self.best = torch.inf
         self.best_epoch = 0
         self.start_time = None
+        self.period = period
 
     def on_train_begin(self):
         self.best = self.get_monitor_value()
@@ -39,23 +43,24 @@ class BestModelCheckpoint(Callback):
 
     def on_epoch_end(self):
         """Save the model at the end of an epoch."""
-        current = self.get_monitor_value()
-        epoch = self.model.train_state.epoch
+        if self.model.train_state.epoch % self.period == 0:
+            current = self.get_monitor_value()
+            epoch = self.model.train_state.epoch
 
-        if current is None:
-            raise ValueError(f"Metric '{self.monitor}' is not available in logs.")
+            if current is None:
+                raise ValueError(f"Metric '{self.monitor}' is not available in logs.")
 
-        if self.save_better_only:
-            if current < (self.best - self.min_delta):
-                self.best = current
+            if self.save_better_only:
+                if current < (self.best - self.min_delta):
+                    self.best = current
+                    self._save_model(epoch, current)
+            else:
                 self._save_model(epoch, current)
-        else:
-            self._save_model(epoch, current)
 
-        if (self.verbose) and ((epoch % 1000) == 0):
-            print(
-                f"Epoch {epoch}: {self.monitor} = {current:.2e} -- Best @ {self.best_epoch}: {self.best:.2e}"
-            )
+            if (self.verbose) and ((epoch % 1000) == 0):
+                print(
+                    f"Epoch {epoch}: {self.monitor} = {current:.2e} -- Best @ {self.best_epoch}: {self.best:.2e}"
+                )
 
     def on_train_end(self):
         if self.verbose > 0:
@@ -68,8 +73,11 @@ class BestModelCheckpoint(Callback):
             checkpoint = torch.load(self.filepath, weights_only=False)
             self.model.net.load_state_dict(checkpoint["model_state_dict"])
 
-    def _save_model(self, epoch, current):
+    def _save_model(self, epoch, current, filepath=None):
         """Save the model to the specified filepath."""
+        if filepath is None:
+            filepath = self.filepath
+
         if self.verbose > 1:
             print(
                 f"Epoch {epoch}: {self.monitor} improved to {current:.2e}, saving model to {self.filepath}"
@@ -88,16 +96,29 @@ class BestModelCheckpoint(Callback):
             "holdout_test_y": self.model.data.holdout_test_y,
             "epoch": epoch,
         }
-        torch.save(checkpoint, self.filepath)
+        torch.save(checkpoint, filepath)
 
         self.best_epoch = epoch
 
     def get_monitor_value(self):
         if self.monitor == "train loss":
-            result = sum(self.model.train_state.loss_train)
+            # Handle both single loss and iterable of losses
+            train_loss = self.model.train_state.loss_train
+            result = (
+                sum(train_loss)
+                if isinstance(train_loss, Iterable)
+                and not isinstance(train_loss, (str, bytes))
+                else train_loss
+            )
         elif self.monitor == "test loss":
-            # self.model._test()
-            result = sum(self.model.train_state.loss_test)
+            # Handle both single loss and iterable of losses
+            test_loss = self.model.train_state.loss_test
+            result = (
+                sum(test_loss)
+                if isinstance(test_loss, Iterable)
+                and not isinstance(test_loss, (str, bytes))
+                else test_loss
+            )
         else:
             raise ValueError("The specified monitor function is incorrect.")
 
@@ -126,7 +147,7 @@ class EvalMetricCallback(Callback):
             self.file = open(self.filepath, "a")
             if not file_exists:
                 self.file.write(
-                    "epoch,train_loss,valid_loss,test_loss,l2_relative_error,mse,mean_residual,mean_abs_residual\n"
+                    "epoch,train_loss,valid_loss,test_loss,l2_relative_error,mse,mean_residual,mean_abs_residual,optimizer_name\n"
                 )
 
         y_pred = self.model.predict(self.X)
@@ -135,37 +156,42 @@ class EvalMetricCallback(Callback):
         mse = mean_squared_error(self.y, y_pred)
         self.model.train_state.mse = mse
 
-        row = (
-            0,
-            np.nan,
-            np.nan,
-            np.nan,
-            l2re,
-            mse,
-        )
+        optimizer_name = self.model.opt_name
+
+        row = (0, np.nan, np.nan, np.nan, l2re, mse, optimizer_name)
 
         if self.filepath is not None:
             self.file.write(",".join(map(str, row)) + "\n")
 
         if self.verbose == 1:
             print(
-                f"Epoch 0 \t\t Train loss = {np.nan:.2e}, Valid loss = {np.nan:.2e}, Test loss = {np.nan:.2e} L2 relative error = {l2re:.2e}, MSE = {mse:.2e}"
+                f"Epoch {self.model.train_state.epoch} \t\t Train loss = {np.nan:.2e}, Valid loss = {np.nan:.2e}, Test loss = {np.nan:.2e} L2 relative error = {l2re:.2e}, MSE = {mse:.2e}"
             )
 
     def on_epoch_end(self):
-
-        if self.model.train_state.loss_test != self.last_test_loss_state:
+        if any(self.model.train_state.loss_test != self.last_test_loss_state):
             self.last_test_loss_state = self.model.train_state.loss_test
 
             epoch = self.model.train_state.epoch
             train_loss = self.model.train_state.loss_train
-            if len(train_loss) == 1:
-                train_loss = train_loss[0]
-            valid_loss = self.model.train_state.loss_test
-            if len(valid_loss) == 1:
-                valid_loss = valid_loss[0]
+            # Handle both single loss and iterable of losses
+            train_loss = (
+                sum(train_loss)
+                if isinstance(train_loss, Iterable)
+                and not isinstance(train_loss, (str, bytes))
+                else train_loss
+            )
 
-            test_loss = np.mean(
+            valid_loss = self.model.train_state.loss_test
+            # Handle both single loss and iterable of losses
+            valid_loss = (
+                sum(valid_loss)
+                if isinstance(valid_loss, Iterable)
+                and not isinstance(valid_loss, (str, bytes))
+                else valid_loss
+            )
+
+            test_loss_pde = np.mean(
                 np.square(self.model.predict(self.X, operator=self.model.data.pde))
             )
 
@@ -175,13 +201,16 @@ class EvalMetricCallback(Callback):
             mse = mean_squared_error(self.y, y_pred)
             self.model.train_state.mse = mse
 
+            optimizer_name = self.model.opt_name
+
             row = (
                 epoch,
                 train_loss,
                 valid_loss,
-                test_loss,
+                test_loss_pde,
                 l2re,
                 mse,
+                optimizer_name,
             )
 
             if self.filepath is not None:
@@ -189,7 +218,9 @@ class EvalMetricCallback(Callback):
 
             if self.verbose == 1 and (epoch % self.verbose_period) == 0:
                 print(
-                    f"Epoch {epoch} \t\t Train loss = {train_loss:.2e}, Valid loss = {valid_loss:.2e}, Test loss = {test_loss:.2e} L2 relative error = {l2re:.2e}, MSE = {mse:.2e}"
+                    f"Epoch {epoch} \t\t Train loss = {train_loss:.2e}, "
+                    f"Valid loss = {valid_loss:.2e}, Test loss = {test_loss_pde:.2e} "
+                    f"L2 relative error = {l2re:.2e}, MSE = {mse:.2e}"
                 )
 
             self.model.loss_history = dde.model.LossHistory()

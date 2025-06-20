@@ -7,42 +7,17 @@ for each experiment.
 Usage:
     python -m pinnfluence_resampling.precalculate_influences [options]
 
-Options:
-    ---- Model parameters ----
-    These are used to load the pre-trained model checkpoint.
-    And are equivalent to the ones found in pretrain.py
-
-    --seed=<int>                Random seed [default: 42]
-    --lr=<float>                Learning rate [default: 0.001]
-    --layers=<list>             Layer sizes [default: [2] + [32] * 3 + [1]]
-    --n_iterations=<int>        Number of iterations [default: 10000]
-    --n_iterations_lbfgs=<int>  Number of LBFGS iterations [default: 0]
-    --num_domain=<int>          Number of domain points [default: 1000]
-    --num_boundary=<int>        Number of boundary points [default: 0]
-    --num_initial=<int>         Number of initial points [default: 0]
-    --problem=<str>             Problem name [default: burgers]
-                                    choices=["allen_cahn", "burgers", "diffusion", "wave"]
-    --float64                   Use float64 [default: False]
-
-    
-    ---- Influence parameters ----
-    --scoring_strategy=<str>    Scoring strategy [default: PINNfluence]
-                                    choices=["PINNfluence", "grad_dot"]  
-    --save_path=<str>           Path to save model [default: ./model_zoo]
-    
+    Use --help to see all available options.
 """
 
 import deepxde as dde
 import numpy as np
 
 from . import problem_factory
-from .utils.parse_args import parse_args
-from .utils.sampling import (
-    sample_random_points,
-    instantiate_IF,
-    calculate_influence_scores,
-    instantiate_grad_dot,
-)
+from .utils.parse_args import parse_precalculate_args as parse_args
+from .utils.sampling import (calculate_influence_scores, instantiate_grad_dot,
+                             instantiate_IF, sample_random_points)
+from .utils.utils import set_default_device
 
 
 def main(
@@ -53,18 +28,24 @@ def main(
     n_iterations: int = 10_000,
     n_iterations_lbfgs: int = 0,
     num_domain: int = 1_000,
-    num_boundary: int = 0,
-    num_initial: int = 0,
     save_path: str = "./model_zoo",
     problem_name: str = "burgers",
     optimizer: str = "adam",
     use_float64: bool = False,
-    scoring_strategy: str = "PINNfluence",
+    scoring_method: str = "PINNfluence",
+    use_holdout_test: bool = False,
+    precalc_infl_sample_uniformly: bool = False,
+    device: str = "cpu",
 ):
-    assert scoring_strategy in ["PINNfluence", "grad_dot"], "Can only precompute PINNfluence or grad_dot"
+    assert scoring_method in [
+        "PINNfluence",
+        "grad_dot",
+    ], "Can only precompute PINNfluence or grad_dot"
     if use_float64:
         dde.config.set_default_float("float64")
     dde.config.set_random_seed(seed)
+
+    set_default_device(device)
 
     # Construct the problem and load the pretrained checkpoint
     model, data, model_name, checkpoint_loaded = problem_factory.construct_problem(
@@ -74,8 +55,6 @@ def main(
         n_iterations=n_iterations,
         n_iterations_lbfgs=n_iterations_lbfgs,
         num_domain=num_domain,
-        num_boundary=num_boundary,
-        num_initial=num_initial,
         optimizer=optimizer,
         seed=seed,
         float64=use_float64,
@@ -88,12 +67,22 @@ def main(
     # reproduce sampling of Scorer class
     dde.config.set_random_seed(42)
 
-    candidate_points = sample_random_points(
-        geometry=model.data.geom, num_points=n_candidate_points
-    )
+    if not use_holdout_test:
+        if precalc_infl_sample_uniformly:
+            candidate_points = data.geom.uniform_points(n_candidate_points)
+        else:
+            candidate_points = sample_random_points(
+                geometry=model.data.geom, num_points=n_candidate_points
+            )
+    else:
+        # Use the holdout test set for candidate points
+        # This is useful for evaluating the scoring strategy on the test set
+        # without the need to recalculate the influence scores
+        candidate_points = model.data.holdout_test_x
+
     print(candidate_points.shape)
 
-    if scoring_strategy == "grad_dot":
+    if scoring_method == "grad_dot":
         graddot = instantiate_grad_dot(model)
 
         infl_scores = calculate_influence_scores(
@@ -140,11 +129,12 @@ if __name__ == "__main__":
         n_iterations=args.n_iterations,
         n_iterations_lbfgs=args.n_iterations_lbfgs,
         num_domain=args.num_domain,
-        num_boundary=args.num_boundary,
-        num_initial=args.num_initial,
         save_path=args.save_path,
         problem_name=args.problem,
         optimizer=args.optimizer,
         use_float64=args.float64,
-        scoring_strategy=args.scoring_strategy,
+        scoring_method=args.scoring_method,
+        use_holdout_test=args.precalc_infl_use_holdout_test,
+        precalc_infl_sample_uniformly=args.precalc_infl_sample_uniformly,
+        device=args.device,
     )

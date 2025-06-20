@@ -1,5 +1,6 @@
 import torch
 
+
 class DummyDataset(torch.utils.data.Dataset):
     def __init__(self, x, return_zeroes=False):
         self.x = torch.tensor(x, requires_grad=True)

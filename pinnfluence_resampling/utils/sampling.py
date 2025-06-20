@@ -1,14 +1,15 @@
-import captum
-import deepxde as dde
-from functools import partial
-import numpy as np
 import os
 import time
+from functools import partial
+
+import captum
+import deepxde as dde
+import numpy as np
 import torch
 from tqdm import tqdm
 
 from .dataset import DummyDataset
-from .models import PINNLoss, ModelWrapper
+from .models import ModelWrapper, PINNLoss
 
 # Experimental setup summary (see full comments in original code)
 # 1. Replace by N training points with different strategies
@@ -23,8 +24,10 @@ class Sampler:
         self,
         strategy: str,
         num_samples: int = 1,
-        k=1,  # exponent for emphasizing high scores
-        c=1,  # constant for flattening the distribution
+        k=2,  # exponent for emphasizing high scores
+        c=0,  # constant for flattening the distribution
+        data: dde.data.Data = None,
+        sampling_strategy: str = "add",
     ):
         assert strategy in [
             "top_k",
@@ -35,7 +38,8 @@ class Sampler:
         self.num_samples = num_samples
         self.distribution_k = k
         self.distribution_c = c
-
+        self.data = data
+        self.sampling_strategy = sampling_strategy
         # Set up the appropriate sampling function
         if self.strategy == "top_k":
             self.sample_points = partial(sample_top_k, k=num_samples)
@@ -48,8 +52,9 @@ class Sampler:
                 f"Strategy {strategy} not implemented (and how did you get past the assert?)"
             )
 
-    def __call__(self, *args, **kwargs):
-        return self.sample_points(*args, **kwargs)
+    def __call__(self, candidate_points, scores):
+        sampled_points, sampled_idx = self.sample_points(candidate_points, scores)
+        return sampled_points
 
 
 def sample_top_k(
@@ -62,15 +67,15 @@ def sample_top_k(
     topk_idx = torch.topk(scores, k, dim=0)[1].numpy()
     sample = candidate_points[topk_idx]
 
-    return sample
+    return sample, topk_idx
 
 
 def sample_from_distribution(
     candidate_points,
     scores,
     n_samples: int,  # = k
-    k=1,  # exponent for emphasizing high scores
-    c=1,  # constant for flattening the distribution
+    k=2,  # exponent for emphasizing high scores
+    c=0,  # constant for flattening the distribution
 ):
     """Sample points based on the distribution of scores"""
     if (scores < 0).any():
@@ -85,7 +90,7 @@ def sample_from_distribution(
         a=len(candidate_points), size=n_samples, p=scores, replace=False
     )
 
-    return candidate_points[sample]
+    return candidate_points[sample], sample
 
 
 class Scorer:
@@ -180,7 +185,8 @@ class Scorer:
     def sample_candidates(self):
         """Sample random points from the geometry"""
         self.candidate_points = sample_random_points(
-            geometry=self.model.data.geom, num_points=self.n_candidate_points
+            geometry=self.model.data.geom,
+            num_points=self.n_candidate_points,
         )
 
     def reinit_IF(self):
@@ -199,11 +205,25 @@ def score_random(candidate_points):
     return np.random.rand(len(candidate_points))
 
 
+def score_residual(model, candidate_points):
+    """Score by residual (absolute PDE residual)"""
+    pde = model.data.pde
+    residuals = np.abs(model.predict(candidate_points, operator=pde))
+
+    if len(residuals.shape) == 3:
+        residuals = residuals.sum(axis=(0, 2))
+    elif len(residuals.shape) == 2:
+        residuals = residuals[:, 0]
+    else:
+        raise ValueError(f"Unexpected shape of residuals: {residuals.shape}")
+
+    return residuals
+
+
 def score_RAR(model, candidate_points):
     """Score by residual-adaptive refinement (absolute PDE residual)"""
-    pde = model.data.pde
 
-    residual_scores = np.abs(model.predict(candidate_points, operator=pde))[:, 0]
+    residual_scores = score_residual(model, candidate_points)
 
     return residual_scores
 
@@ -227,8 +247,6 @@ def score_TDA(
         "PINNfluence",
         "grad_dot",
     ], f"Please choose tda_method from ['PINNfluence', 'grad_dot']"
-
-    print(potential_precalculated)
 
     if potential_precalculated is not None:
         print(f"Precalculated exists: {os.path.exists(potential_precalculated)}")
@@ -272,9 +290,7 @@ def score_steepest_loss_gradient(model, candidate_points, show_progress=False):
     candidate_loader = wrap_points_in_dataloader(candidate_points, batch_size=1024)
 
     wrapped_model = ModelWrapper(
-        net=model.net,
-        pde=model.data.pde,
-        bcs=model.data.bcs,
+        net=model.net, pde=model.data.pde, bcs=model.data.bcs  # bcs are None
     )
     grads_l2_norms = []
 
@@ -346,7 +362,7 @@ def instantiate_IF(
     pde_net = ModelWrapper(
         net=net,
         pde=data.pde,
-        bcs=data.bcs,  # Note: should be [] as all pdes are hard constrained
+        bcs=data.bcs,
     )
 
     print("Approximating hessian")
@@ -433,12 +449,16 @@ def calculate_influence_scores(
 
 def sample_random_points(
     geometry: dde.geometry.Geometry,
-    candidate_points=None,
-    scores=None,
     num_points: int = 1,
 ):
-    """Sample random points from the geometry"""
-    return geometry.random_points(num_points, random="pseudo")
+    """Sample random points from the geometry maintaining the same ratios as model data.
+
+    Args:
+        geometry: The geometry to sample from
+        num_points: Total number of points to sample
+    """
+    points = geometry.random_points(num_points, random="pseudo")
+    return points
 
 
 def compute_input_wise_l2_norm(grads):

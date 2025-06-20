@@ -3,8 +3,10 @@ import argparse
 from .defaults import DEFAULTS
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
+def common_arg_parser():
+    parser = argparse.ArgumentParser(
+        add_help=False, formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     parser.add_argument(
         "--seed", type=int, default=DEFAULTS["seed"], help="Random seed"
     )
@@ -40,18 +42,6 @@ def parse_args():
         help="Number of domain points",
     )
     parser.add_argument(
-        "--num_boundary",
-        type=int,
-        default=DEFAULTS["num_boundary"],
-        help="Number of boundary points",
-    )
-    parser.add_argument(
-        "--num_initial",
-        type=int,
-        default=DEFAULTS["num_initial"],
-        help="Number of initial points",
-    )
-    parser.add_argument(
         "--save_path",
         type=str,
         default=DEFAULTS["model_zoo"],
@@ -62,12 +52,19 @@ def parse_args():
         type=str,
         default="burgers",
         help="Problem/PDE to run experiment for",
-        choices=["allen_cahn", "burgers", "diffusion", "wave"],
+        choices=[
+            "allen_cahn",
+            "burgers",
+            "diffusion",
+            "drift_diffusion",
+            "wave",
+        ],
     )
     parser.add_argument(
         "--optimizer",
         type=str,
         help="Which optimizer to use for training",
+        choices=["adam", "L-BFGS"],
         default=DEFAULTS["optimizer"],
     )
     parser.add_argument(
@@ -76,33 +73,55 @@ def parse_args():
         help="Use float64",
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        help="Device to use for training.",
+        default="cpu",
+        choices=["cpu", "cuda", "mps"],
+    )
+    return parser
+
+
+def parse_pretrain_args():
+    parser = argparse.ArgumentParser(
+        description="Pretrain a PINN model",
+        parents=[common_arg_parser()],
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    return parser.parse_args()
+
+
+def parse_run_experiment_args():
+    parser = argparse.ArgumentParser(
+        description="Run a finetuning experiment. If you want to use a pretrained model, please match the arguments of the respective pretraining run.",
+        parents=[common_arg_parser()],
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--sampling_strategy",
+        type=str,
+        default="distribution",
+        choices=["top_k", "distribution"],
+        help="Sampling strategy",
+    )
+    parser.add_argument(
         "--n_candidate_points",
         type=int,
-        help="Number of candidate points to from for resampling.",
-        default=10_000,
+        default=10000,
+        help="Number of candidate points",
     )
     parser.add_argument(
-        "--n_samples",
-        type=int,
-        help="Number of samples to take from candidate points.",
-        default=1_000,
+        "--n_samples", type=int, default=10, help="Number of samples to select"
     )
     parser.add_argument(
-        "--distribution_k",
-        type=int,
-        help="K parameter for distribution.",
-        default=1,
+        "--distribution_k", type=int, default=2, help="Distribution parameter k"
     )
     parser.add_argument(
-        "--distribution_c",
-        type=int,
-        help="C parameter for distribution.",
-        default=1,
+        "--distribution_c", type=int, default=0, help="Distribution parameter c"
     )
     parser.add_argument(
-        "--scoring_strategy",
+        "--scoring_method",
         type=str,
-        help="Which scoring strategy to use.",
         default="PINNfluence",
         choices=[
             "PINNfluence",
@@ -112,50 +131,79 @@ def parse_args():
             "steepest_prediction_gradient",
             "steepest_loss_gradient",
         ],
+        help="Scoring strategy",
     )
     parser.add_argument(
         "--scoring_sign",
         type=str,
-        help="Which sign to use for scoring.",
         default="abs",
         choices=["abs", "pos", "neg"],
+        help="Sign for scoring",
     )
     parser.add_argument(
-        "--training_strategy",
+        "--pertubation_strategy",
         type=str,
-        help="Which training strategy to use.",
-        default="incremental",
-        choices=["replace", "add", "incremental", "incremental_replace"],
+        default="add",
+        choices=["add", "replace"],
+        help="Training strategy",
     )
     parser.add_argument(
         "--n_iterations_finetune",
         type=int,
-        help="Number of iterations to finetune.",
-        default=1_000,
+        default=1000,
+        help="Number of finetuning iterations",
     )
     parser.add_argument(
         "--n_iterations_lbfgs_finetune",
         type=int,
-        help="Number of LBFGS iterations to finetune.",
         default=0,
-    )
-    parser.add_argument(
-        "--sampling_strategy",
-        type=str,
-        help="Which sampling strategy to use.",
-        default="distribution",
-        choices=["top_k", "distribution"],
+        help="L-BFGS iterations for finetuning",
     )
     parser.add_argument(
         "--model_version",
         type=str,
-        help="Model version to load (chosen by best validation or train loss - or simply at final epoch)",
         default="full",
         choices=["full", "train", "valid"],
+        help="Model version to load",
     )
     parser.add_argument(
         "--recover_run",
         action="store_true",
-        help="Recover run (finetuned) and repeat finetuning.",
+        help="Recover and continue finetuning",
+    )
+    parser.add_argument(
+        "--n_cycles_finetune", type=int, default=100, help="Number of finetuning cycles"
+    )
+    return parser.parse_args()
+
+
+def parse_precalculate_args():
+    parser = argparse.ArgumentParser(
+        description="Precalculate influence scores. Please match the arguments of the respective pretraining run you with to precalculate influences for.",
+        parents=[common_arg_parser()],
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--n_candidate_points",
+        type=int,
+        default=10_000,
+        help="Number of candidate points",
+    )
+    parser.add_argument(
+        "--scoring_method",
+        type=str,
+        default="PINNfluence",
+        choices=["PINNfluence", "grad_dot"],
+        help="Scoring strategy",
+    )
+    parser.add_argument(
+        "--precalc_infl_use_holdout_test",
+        action="store_true",
+        help="Use holdout test set for precalc",
+    )
+    parser.add_argument(
+        "--precalc_infl_sample_uniformly",
+        action="store_true",
+        help="Sample uniformly for precalc",
     )
     return parser.parse_args()

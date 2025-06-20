@@ -1,8 +1,9 @@
+from typing import Callable, Iterable, Literal, Tuple
+
 import deepxde as dde
 import numpy as np
 import torch
 
-from typing import Iterable, Tuple, Literal, Callable
 
 class PINNLoss(torch.nn.modules.loss._Loss):
     def __init__(
@@ -122,9 +123,15 @@ class ModelWrapper(torch.nn.Module):
             x_np = x.detach().cpu().numpy()
             for bc in self.bcs:
                 bc_loss = torch.zeros((x.shape[0], 1), device=x.device)
-                bc_mask = torch.tensor(
-                    bc.on_boundary(x_np, np.ones_like(x_np[:, 0]))
-                ).bool()
+
+                if isinstance(bc, dde.icbc.IC):
+                    bc_mask = torch.tensor(
+                        bc.on_initial(x_np, bc.geom.on_initial(x_np))
+                    ).bool()
+                else:
+                    bc_mask = torch.tensor(
+                        bc.on_boundary(x_np, bc.geom.on_boundary(x_np))
+                    ).bool()
 
                 if bc_mask.any():
                     x_subset = x[bc_mask].clone().detach().requires_grad_(True)

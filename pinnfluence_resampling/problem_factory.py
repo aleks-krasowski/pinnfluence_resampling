@@ -4,25 +4,27 @@ shall provide a fairly generic way to instantiate the problems from this repo:
 https://github.com/lu-group/pinn-sampling/
 
 which implements this paper https://www.sciencedirect.com/science/article/pii/S0045782522006260
+
+and more :-)
 """
 
-import deepxde as dde
-import numpy as np
-import os
 from pathlib import Path
-from scipy.io import loadmat
-import torch
-
 from typing import Callable
 
-from .utils.defaults import DEFAULTS
+import deepxde as dde
+import torch
+
 from . import datasets
+from .utils.defaults import DEFAULTS
+from .utils.problems import problems
 
 dataset_dir = datasets.__path__[0]
-model_zoo_src = DEFAULTS["model_zoo_src"]
 
 
-def create_net(layers=[2] + [20] * 3 + [1], output_transform=None):
+def create_net(
+    layers=[2] + [20] * 3 + [1],
+    output_transform=None,
+):
     net = dde.maps.FNN(layers, "tanh", "Glorot normal")
 
     if output_transform is not None:
@@ -36,35 +38,38 @@ def load_checkpoint(net, chkpt_path):
     print(f"Best epoch: {chkpt['epoch']}")
     net.load_state_dict(chkpt["model_state_dict"])
     return net
-    
+
 
 # all the geometries are 1D intervals over time
-def create_geomtime(x_start=-1, x_end=1, t_start=0, t_end=1):
+def create_geom(x_start=-1, x_end=1, t_start=0, t_end=1):
     geom = dde.geometry.Interval(x_start, x_end)
     timedomain = dde.geometry.TimeDomain(t_start, t_end)
     return dde.geometry.GeometryXTime(geom, timedomain)
 
 
 def create_data(
-    geomtime,
+    geom,
     equation,
     num_domain=1_000,
-    num_boundary=0,
-    num_initial=0,
     num_test=10_000,
     solution=None,
 ):
-    return dde.data.TimePDE(
-        geomtime,
-        equation,
-        ic_bcs=[],
-        num_domain=num_domain,
-        num_boundary=num_boundary,
-        num_initial=num_initial,
-        num_test=num_test,
-        solution=solution,
-        train_distribution="Hammersley",
-    )
+    if isinstance(geom, dde.geometry.GeometryXTime):
+        target_data = dde.data.TimePDE
+    else:
+        target_data = dde.data.PDE
+
+    args = {
+        "num_domain": num_domain,
+        "num_test": num_test,
+        "solution": solution,
+        "train_distribution": "Hammersley",
+    }
+
+    data = target_data(geom, equation, [], **args)
+    data.num_domain = num_domain
+
+    return data
 
 
 def resample_validation_and_test(
@@ -140,8 +145,6 @@ def construct_problem(
     lr=0.001,
     layers=[2] + [32] * 3 + [1],
     num_domain=1_000,
-    num_boundary=0,
-    num_initial=0,
     optimizer="adam",
     seed=42,
     n_iterations=10_000,
@@ -150,7 +153,13 @@ def construct_problem(
     force_reinit=False,
     float64=False,
     model_version=None,
-):
+    model_zoo_src=DEFAULTS["model_zoo_src"],
+) -> tuple[dde.Model, dde.data.Data, str, str]:
+
+    if float64:
+        dde.config.set_default_float("float64")
+
+    print(f"model_zoo_src: {model_zoo_src}")
     problem = problems[problem_name]
 
     equation = problem["equation"]
@@ -164,23 +173,27 @@ def construct_problem(
         n_iterations=n_iterations,
         n_iterations_lbfgs=n_iterations_lbfgs,
         num_domain=num_domain,
-        num_boundary=num_boundary,
-        num_initial=num_initial,
         layers=layers,
         seed=seed,
         float64=float64,
     )
 
-    geomtime = create_geomtime(x_start=problem.get("x_start", -1))
+    net = create_net(
+        layers=layers,
+        output_transform=output_transform,
+    )
 
-    net = create_net(layers=layers, output_transform=output_transform)
+    geom = create_geom(
+        x_start=problem.get("x_start", -1),
+        x_end=problem.get("x_end", 1),
+        t_start=problem.get("t_start", 0),
+        t_end=problem.get("t_end", 1),
+    )
 
     data = create_data(
-        geomtime,
+        geom,
         equation,
         num_domain=num_domain,
-        num_boundary=num_boundary,
-        num_initial=num_initial,
         solution=solution,
     )
 
@@ -194,6 +207,7 @@ def construct_problem(
 
     if not force_reinit:
         if checkpoint_path is None:
+            print(f"Loading checkpoint under {model_zoo_src} under name: {model_name}")
             if model_version is None or model_version == "full":
                 chkpts = list(Path(model_zoo_src).rglob(f"{model_name}_full.pt"))
             elif model_version == "train":
@@ -208,7 +222,6 @@ def construct_problem(
 
         if checkpoint_path is not None:
             net = load_checkpoint(net, checkpoint_path)
-
             data = restore_data(data, checkpoint_path)
 
     model = compile_model(
@@ -231,150 +244,9 @@ def get_model_name(
     n_iterations: int,
     n_iterations_lbfgs: int,
     num_domain: int,
-    num_boundary: int,
-    num_initial: int,
     float64: bool,
     layers=[2] + [20] * 3 + [1],
     seed=42,
 ):
-    model_name = f"{problem_name}_{optimizer}_{n_iterations}_adam_{n_iterations_lbfgs}_lbfgs_{num_domain}_domain_{num_boundary}_bdry_{num_initial}_init_{len(layers)-2}_x_{layers[1]}_hidden_float64_{float64}_{seed}"
+    model_name = f"{problem_name}_{optimizer}_{n_iterations}_adam_{n_iterations_lbfgs}_lbfgs_{num_domain}_domain_init_{len(layers)-2}_x_{layers[1]}_hidden_float64_{float64}_{seed}"
     return model_name
-
-
-# ALLEN CAHN
-# see https://github.com/lu-group/pinn-sampling/blob/main/src/allen_cahn/RAR_G.py
-
-
-def allen_cahn_equation(x, y):
-    u = y
-    du_xx = dde.grad.hessian(y, x, i=0, j=0)
-    du_t = dde.grad.jacobian(y, x, j=1)
-    return du_t - 0.001 * du_xx + 5 * (u**3 - u)
-
-
-def allen_cahn_output_transform(x, y):
-    x_in = x[:, 0:1]
-    t_in = x[:, 1:2]
-    return t_in * (1 + x_in) * (1 - x_in) * y + torch.square(x_in) * torch.cos(
-        np.pi * x_in
-    )
-
-
-def allen_cahn_load_testdata():
-    default_float = dde.config.default_float()
-
-    data = loadmat(f"{dataset_dir}/usol_D_0.001_k_5.mat")
-    t = data["t"].astype(np.dtype(default_float))
-    x = data["x"].astype(np.dtype(default_float))
-    u = data["u"].astype(np.dtype(default_float))
-    xx, tt = np.meshgrid(x, t)
-    X = np.vstack((np.ravel(xx), np.ravel(tt))).T
-    y = u.flatten()[:, None]
-    return X, y
-
-
-# BURGERS
-# see https://github.com/lu-group/pinn-sampling/blob/main/src/burgers/RAR_G.py
-
-
-def burgers_equation(x, y):
-    dy_x = dde.grad.jacobian(y, x, i=0, j=0)
-    dy_t = dde.grad.jacobian(y, x, i=0, j=1)
-    dy_xx = dde.grad.hessian(y, x, i=0, j=0)
-    return dy_t + y * dy_x - 0.01 / dde.backend.torch.pi * dy_xx
-
-
-def burgers_output_transform(x, y):
-    return -torch.sin(np.pi * x[:, 0:1]) + (1 - x[:, 0:1] ** 2) * (x[:, 1:]) * y
-
-
-def burgers_load_testdata():
-    default_float = dde.config.default_float()
-    data = np.load(f"{dataset_dir}/Burgers.npz")
-    t, x, exact = (
-        data["t"].astype(np.dtype(default_float)),
-        data["x"].astype(np.dtype(default_float)),
-        data["usol"].astype(np.dtype(default_float)).T,
-    )
-    xx, tt = np.meshgrid(x, t)
-    X = np.vstack((np.ravel(xx), np.ravel(tt))).T
-    y = exact.flatten()[:, None]
-    return X, y
-
-
-# DIFFUSION
-# see: https://github.com/lu-group/pinn-sampling/blob/main/src/diffusion/RAR_G.py
-
-
-def diffusion_equation(x, y):
-    dy_t = dde.grad.jacobian(y, x, j=1)
-    dy_xx = dde.grad.hessian(y, x, j=0)
-    return (
-        dy_t
-        - dy_xx
-        + torch.exp(-x[:, 1:])
-        * (torch.sin(np.pi * x[:, 0:1]) - np.pi**2 * torch.sin(np.pi * x[:, 0:1]))
-    )
-
-
-def diffusion_output_transform(x, y):
-    return torch.sin(np.pi * x[:, 0:1]) + (1 - x[:, 0:1] ** 2) * (x[:, 1:]) * y
-
-
-def diffusion_solution(x):
-    return np.sin(np.pi * x[:, 0:1]) * np.exp(-x[:, 1:])
-
-
-# WAVE
-# see https://github.com/lu-group/pinn-sampling/blob/main/src/wave/RAR_G.py
-
-
-def wave_equation(x, y):
-    dy_tt = dde.grad.hessian(y, x, i=1, j=1)
-    dy_xx = dde.grad.hessian(y, x, i=0, j=0)
-    return dy_tt - 4.0 * dy_xx
-
-
-def wave_solution(x):
-    return np.sin(np.pi * x[:, 0:1]) * np.cos(2 * np.pi * x[:, 1:2]) + 0.5 * np.sin(
-        4 * np.pi * x[:, 0:1]
-    ) * np.cos(8 * np.pi * x[:, 1:2])
-
-
-def wave_output_transform(x, y):
-    x_in = x[:, 0:1]
-    t_in = x[:, 1:2]
-    return (
-        20 * y * x_in * (1 - x_in) * t_in**2
-        + torch.sin(np.pi * x_in)
-        + 0.5 * torch.sin(4 * np.pi * x_in)
-    )
-
-
-problems = {
-    "allen_cahn": {
-        "equation": allen_cahn_equation,
-        "output_transform": allen_cahn_output_transform,
-        "load_testdata": allen_cahn_load_testdata,
-        "solution": None,
-    },
-    "burgers": {
-        "equation": burgers_equation,
-        "output_transform": burgers_output_transform,
-        "load_testdata": burgers_load_testdata,
-        "solution": None,
-    },
-    "diffusion": {
-        "equation": diffusion_equation,
-        "output_transform": diffusion_output_transform,
-        "load_testdata": None,
-        "solution": diffusion_solution,
-    },
-    "wave": {
-        "equation": wave_equation,
-        "output_transform": wave_output_transform,
-        "load_testdata": None,
-        "solution": wave_solution,
-        "x_start": 0,  # NOTE the different x_start
-    },
-}

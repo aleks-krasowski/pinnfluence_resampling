@@ -1,24 +1,9 @@
 import json
-import matplotlib.pyplot as plt
 import os
-import pandas as pd
 from pathlib import Path
-import seaborn as sns
-import torch
 
-colors = {
-    "random": "blue",
-    "Random": "blue",
-    "RAR": "orange",
-    "PINNfluence": "green",
-    "PINNfluence (ours)": "green",
-    "grad_dot": "red",
-    "Grad-Dot": "red",
-    "steepest_prediction_gradient": "brown",
-    "$||\\nabla_{x} u||_2$": "brown",
-    "steepest_loss_gradient": "purple",
-    "$||\\nabla_{\\theta} \\mathcal{L}||_2$": "purple",
-}
+import pandas as pd
+import torch
 
 
 def set_default_device(device: str = "cpu"):
@@ -34,7 +19,10 @@ def set_default_device(device: str = "cpu"):
             torch.set_default_device("cpu")
     elif device == "mps":
         if torch.backends.mps.is_built() and torch.backends.mps.is_available():
+            torch._dynamo.disable()
             torch.set_default_device("mps")
+            torch._dynamo.reset()
+            print("Using mps")
             os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
             print("Using MPS")
         else:
@@ -59,9 +47,9 @@ def generate_experiment_df(experiment_path: str):
             "n_samples",
             "distribution_k",
             "distribution_c",
-            "scoring_strategy",
+            "scoring_method",
             "scoring_sign",
-            "training_strategy",
+            "pertubation_strategy",
             "epoch",
             "criterion",
             "train_loss",
@@ -110,67 +98,3 @@ def generate_experiment_df(experiment_path: str):
             df = pd.concat([df, pd.DataFrame([config])])
 
     return df
-
-
-def plot_lineplots(
-    df,
-    problem=None,
-    training_strategies=["add"],
-    metrics=["test_loss", "l2re"],
-    criterions=["train", "valid"],
-    sampling_strategies=["distribution"],
-    scoring_strategies=[
-        "random",
-        "RAR",
-        "PINNfluence",
-        "grad_dot",
-        "steepest_prediction_gradient",
-    ],
-    colors=colors,
-):
-
-    _df = df.copy()
-
-    if problem is not None:
-        _df = _df.loc[df["problem"] == problem]
-
-    for training_strategy in training_strategies:
-        for criterion in criterions:
-            for sampling_strategy in sampling_strategies:
-                for metric in metrics:
-                    plt.figure(figsize=(12, 6))
-                    title = (
-                        f"Strategy: {training_strategy}, "
-                        f"Sampling: {sampling_strategy}, Criterion: {criterion}, Metric {metric}"
-                    )
-                    if problem is not None:
-                        title = f"Problem: {problem}, {title}"
-                    plt.title(title)
-
-                    subset = _df.loc[
-                        (_df["training_strategy"] == training_strategy)
-                        & (_df["criterion"] == criterion)
-                        & (_df["sampling_strategy"] == sampling_strategy)
-                    ]
-
-                    for scoring_strategy in scoring_strategies:
-                        cur_df = subset.loc[
-                            subset["scoring_strategy"] == scoring_strategy
-                        ]
-
-                        sns.lineplot(
-                            data=cur_df,
-                            x="n_samples",
-                            y=metric,
-                            label=scoring_strategy,
-                            color=colors.get(scoring_strategy),
-                            errorbar=("ci", 95),
-                            estimator="mean",
-                            err_style="bars",
-                        )
-
-                    plt.yscale("log")
-                    plt.legend()
-                    plt.xlabel("Number of Samples")
-                    plt.xscale("log")
-                    plt.show()
