@@ -30,7 +30,7 @@ python -m deepxde.backend.set_default_backend pytorch
 
 We introduce a novel resampling method based on [**PINNfluence**](https://arxiv.org/abs/2409.08958) (Influence Functions for PINNs). Influence Functions (IFs) quantify the effect of removing or **adding** individual training points on the model's predictions. PINNfluence-based resampling thus prioritizes most impactful points. 
 
-The influence of adding a point $\boldsymbol x^+$ onto the loss of the test set $\mathcal{L}_{\text{test}} = \sum_{x \in \mathcal X_{\text{test}}} L(\boldsymbol x, \theta)$ given by:
+The influence of adding a point $\boldsymbol x^+$ onto the loss of the test set ![loss](https://latex.codecogs.com/svg.image?\mathcal{L}{\text{test}}=\sum{x\in\mathcal{X}_{\text{test}}}L(\boldsymbol{x},\theta)) given by:
 
 ![Eq1](https://latex.codecogs.com/svg.image?\operatorname{Inf}_{\mathcal{L}_{\text{test}}(\hat{\theta})}(\boldsymbol{x}^+):=\nabla_{\theta}\mathcal{L}_{\text{test}}(\hat{\theta})^\top\mathcal{H}_{\hat{\theta}}^{-1}\nabla_{\theta}\mathcal{L}(\boldsymbol{x}^+;\hat{\theta}))
 
