@@ -32,42 +32,33 @@ We introduce a novel resampling method based on [**PINNfluence**](https://arxiv.
 
 The influence of adding a point $\boldsymbol x^+$ onto the loss of the test set $\mathcal{L}_{\text{test}} = \sum_{x \in \mathcal X_{\text{test}}} L(\boldsymbol x, \theta)$ given by:
 
-$$
-\operatorname{Inf}_{\mathcal{L}_\text{test}(\hat{\theta})}(\boldsymbol{x}^+)\coloneqq \nabla_{\theta}\mathcal{L}_\text{test}(\hat{\theta})^\top\mathcal{H}_{\hat{\theta}}^{-1}\ \nabla_{\theta} L(\boldsymbol{x}^+;\hat{\theta}),
-$$
+![Eq1](https://latex.codecogs.com/svg.image?\operatorname{Inf}_{\mathcal{L}_{\text{test}}(\hat{\theta})}(\boldsymbol{x}^+):=\nabla_{\theta}\mathcal{L}_{\text{test}}(\hat{\theta})^\top\mathcal{H}_{\hat{\theta}}^{-1}\nabla_{\theta}\mathcal{L}(\boldsymbol{x}^+;\hat{\theta}))
 
 where $L(\cdot; \hat\theta)$ denotes the PINN loss given model parameters $\hat\theta$ and $\mathcal H_{\hat\theta} = \frac{1}{N_{\text{train}}} \nabla^2_{\theta} \sum_{\boldsymbol x \in \mathcal{X}_{\text{train}}}L(\boldsymbol x, \hat\theta)$ the Hessian of the training loss w.r.t. model parameters.
 
 We score importance of a candidate point $\boldsymbol x^+$ is given by the absolute influence:
 
-$$
-S_{\text{Inf}}(\boldsymbol x^+) = \left| \operatorname{Inf}_{\mathcal{L}_{\text{test}}(\hat\theta)}(\boldsymbol x^+) \right|
-$$
+![Eq2](https://latex.codecogs.com/svg.image?S_{\text{Inf}}(\boldsymbol&space;x^&plus;)=\left|\operatorname{Inf}_{\mathcal{L}_{\text{test}}(\hat\theta)}(\boldsymbol&space;x^&plus;)\right|)
 
 In addition to using **PINNfluence** to score importance we also include:
 
 **Residual Adaptive Resampling (RAR)** ([Lu Lu et al., 2019](https://ml4physicalsciences.github.io/2019/files/NeurIPS_ML4PS_2019_2.pdf); [Wu et al., 2022](https://arxiv.org/abs/2207.10289))
-$$
-\mathcal{S}_{\text{RAR}}(\boldsymbol x^+) = \left| \mathcal{N}[\phi(\boldsymbol{x}^+; \hat\theta)] \right|
-$$
+
+![Eq3](https://latex.codecogs.com/svg.image?\mathcal{S}_{\text{RAR}}(\boldsymbol&space;x^&plus;)=\|\mathcal{N}[\phi(\boldsymbol{x}^&plus;;\hat\theta)]\|_2)
 
 **Grad-Dot** ([Charpiat et al., 2019](https://arxiv.org/abs/2102.05262))
 
-$$
-\mathcal{S}_{\text{grad-dot}}(\boldsymbol{x}^+) = \left| \nabla_{\theta}\mathcal{L}_\text{test}(\hat{\theta})^\top \nabla_{\theta}\mathcal{L}(\boldsymbol{x}^+;\hat{\theta}) \right|
-$$
+
+![Eq4](https://latex.codecogs.com/svg.image?\mathcal{S}_{\text{grad-dot}}(\boldsymbol{x}^&plus;)=\nabla_{\theta}\mathcal{L}_\text{test}(\hat{\theta})^\top\nabla_{\theta}\mathcal{L}(\boldsymbol{x}^&plus;;\hat{\theta}))
 
 **Prediction Gradient**
 
-$$
-\mathcal{S}_{\text{output-grad}}(\boldsymbol{x}) = \left\| \nabla_{\boldsymbol x} \phi(\boldsymbol{x}; \hat{\theta}) \right\|_2
-$$
+
+![Eq5](https://latex.codecogs.com/svg.image?\mathcal{S}_{\text{output-grad}}(\boldsymbol{x})=\left\|\nabla_{\boldsymbol&space;x}\phi(\boldsymbol{x};\hat{\theta})\right\|_2)
 
 **Loss Gradient**
 
-$$
-\mathcal{S}_{\text{loss-grad}}(\boldsymbol{x}) = \left\| \nabla_{\theta} \mathcal{L}(\boldsymbol{x}; \hat\theta) \right\|_2
-$$
+![Eq6](https://latex.codecogs.com/svg.image?\mathcal{S}_{\text{loss-grad}}(\boldsymbol{x})=\left\|\nabla_{\theta}\mathcal{L}(\boldsymbol{x};\hat\theta)\right\|_2)
 
 For evaluation we include 5 different partial derivative equations (PDEs):
 - Diffusion Equation (`"diffusion"`)
