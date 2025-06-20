@@ -73,34 +73,18 @@ You may start an
 
 ```bash
 python -m pinnfluence_resampling.run_experiment \
-                  # PDE
-                  --problem allen_cahn \
-                  # network arch
-                  --layers 2 64 64 64 1 \
-                  # size of X_train
-                  --num_domain 1_000 \
-                  # pretraining steps (run pinnfluence_resampling.pretrain before)
-                  --n_iterations 0 \
-                  # target path for model saving
-                  --save_path model_zoo/allen_cahn \
-                  # scoring strategy PINNfluence, RAR, ...
+                  --problem diffusion \
+                  --layers 2 32 32 32 1 \
+                  --num_domain 30 \
                   --scoring_method PINNfluence \
-                  # sampling strategy distribution or top-k
+                  --pertubation_strategy add \
                   --sampling_strategy distribution \
-                  # distribution paremeters
                   --distribution_k 2 \
                   --distribution_c 0 \
-                  # incrementally adding points
-                  --pertubation_strategy add \
-                  # number of points to add per iter
-                  --n_samples 10 \
-                  # number of adam iterations in each cycle
+                  --n_samples 1 \
                   --n_iterations_finetune 1_000 \
-                  # number of LBFGS iterations in each cycle
                   --n_iterations_lbfgs_finetune 1_000 \
-                  # use 64 bit precision
                   --float64 \
-                  # RNG seed
                   --seed 1 
 ```
 
@@ -120,12 +104,12 @@ We omitted pretraining in the publication but feel free to utilize it before app
 
 ```bash
 python -m pinnfluence_resampling.pretrain \
-                  --problem allen_cahn \
-                  --n_iterations 15_000 \
-                  --layers 2 64 64 64 1 \
-                  --num_domain 1_000 \
+                  --problem diffusion \
+                  --n_iterations 5_000 \
+                  --layers 2 32 32 32 1 \
+                  --num_domain 30 \
                   --seed 42 \
-                  --save_path model_zoo/allen_cahn
+                  --save_path model_zoo/diffusion
 ```
 
 The pretraining will store both the trained model (`.pt`) and training history (`.csv`) under the specified `save_path`.
