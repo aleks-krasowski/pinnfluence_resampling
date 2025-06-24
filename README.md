@@ -124,8 +124,14 @@ If you wish to implement more PDEs we recommend doing so in the [pinnfluence_res
 Please use the following citation when referencing resampling using PINNfluence in literature:
 
 ```bibtex
-@misc{
-      placeholder
+@misc{naujoks2025leveraginginfluencefunctionsresampling,
+      title={{Leveraging Influence Functions} for {Resampling Data} in {Physics-Informed Neural Networks}}, 
+      author={Jonas R. Naujoks and Aleksander Krasowski and Moritz Weckbecker and Galip Ümit Yolcu and Thomas Wiegand and Sebastian Lapuschkin and Wojciech Samek and René P. Klausen},
+      year={2025},
+      eprint={2506.16443},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2506.16443}, 
 }
 ```
 
